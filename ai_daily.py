@@ -14,7 +14,7 @@ from PIL import Image, ImageDraw, ImageFont
 # ── 配置 ──
 BG目录 = Path("backgrounds")
 输出目录 = Path("output")
-DEEPSEEK端口 = "ws://127.0.0.1:9226"
+DEEPSEEK端口 = 9226
 账号 = "xie_total_default"
 平台列表 = ["kuaishou", "xiaohongshu", "douyin"]
 最多条数 = 7
@@ -72,6 +72,14 @@ def 精选(原始数据: list) -> list:
     """喂给 DeepSeek 网页版，返回 [{标题, 摘要, 排序}]"""
     from playwright.sync_api import sync_playwright
 
+    # 连浏览器 CDP（用 /json/version 拿浏览器级地址）
+    try:
+        信息 = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{DEEPSEEK端口}/json/version", timeout=5).read())
+        CDP地址 = 信息["webSocketDebuggerUrl"]
+    except Exception as e:
+        日志.error(f"CDP 连接失败: {e}")
+        return []
+
     提示 = (
         "你是一个AI新闻编辑。从以下昨日AI新闻中选出最重要的5-7条，按热度排序。\n"
         "只输出JSON数组，不要多余文字：\n"
@@ -83,15 +91,26 @@ def 精选(原始数据: list) -> list:
         提示 += f"{i+1}. {n['标题'][:100]}\n"
 
     with sync_playwright() as p:
-        浏览器 = p.chromium.connect_over_cdp(DEEPSEEK端口)
-        页面 = 浏览器.contexts[0].pages[0]
-        # ponytail: 假设页面已打开 + 已登录，不处理登录逻辑
-        输入框 = 页面.locator("textarea, [contenteditable='true']").first
+        浏览器 = p.chromium.connect_over_cdp(CDP地址)
+        # 找 DeepSeek 页面
+        页面 = None
+        for ctx in 浏览器.contexts:
+            for pg in ctx.pages:
+                if "deepseek" in pg.url or "chat" in pg.url:
+                    页面 = pg
+                    break
+        if not 页面:
+            日志.error("没找到 DeepSeek 页面")
+            return []
+
+        # ponytail: 假设页面已打开 + 已登录
+        输入框 = 页面.locator("textarea").first
         输入框.fill(提示)
         页面.keyboard.press("Enter")
         日志.info("等待 DeepSeek 回复...")
-        time.sleep(30)  # ponytail: 固定等待，不搞轮询
-        回复 = 页面.locator(".ds-markdown, .prose, .message:last-child").last.text_content()
+        time.sleep(30)  # ponytail: 固定等待
+        # 拿最后一次回复（最后一条AI消息）
+        回复 = 页面.locator(".ds-markdown, .message:last-child, [class*='ds-markdown']").last.text_content()
 
     # 解析 JSON
     匹配 = re.search(r'```json\s*([\s\S]*?)\s*```', 回复 or "")
@@ -158,15 +177,15 @@ def 生成内容页(标题: str, 页码: int, 总页: int, 输出路径: Path) -
 def 渲染轮播图(精选结果: list) -> tuple:
     """生成多图轮播，返回 (图片路径列表, 文案)"""
     今日 = datetime.now().strftime("%Y-%m-%d")
-    输出目录 = 输出目录 / 今日
-    输出目录.mkdir(parents=True, exist_ok=True)
+    本次输出 = 输出目录 / 今日
+    本次输出.mkdir(parents=True, exist_ok=True)
 
     图片列表 = []
     # 封面
-    图片列表.append(生成封面(今日, len(精选结果), 输出目录))
+    图片列表.append(生成封面(今日, len(精选结果), 本次输出))
     # 内容页
     for i, 条目 in enumerate(精选结果):
-        图片列表.append(生成内容页(条目["标题"], i + 1, len(精选结果), 输出目录))
+        图片列表.append(生成内容页(条目["标题"], i + 1, len(精选结果), 本次输出))
 
     # 文案
     文案行 = ["🤖 AI 日报\n"]
