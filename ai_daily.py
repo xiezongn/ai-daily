@@ -205,16 +205,19 @@ def 发布(图片列表: list, 文案: str) -> dict:
     结果 = {}
     for 平台 in 平台列表:
         try:
-            # ponytail: 直接调 CLI，不封装 API
+            # ponytail: 直接调 CLI，不 capture_output（sau 输出有 emoji，GBK 解码会炸）
             命令 = ["sau", 平台, "upload-note",
                     "--account", 账号,
                     "--title", "AI 日报",
                     "--note", 文案]
             for 图 in 图片列表:
                 命令 += ["--images", 图]
-            执行 = subprocess.run(命令, capture_output=True, text=True, timeout=180)
+            执行 = subprocess.run(命令, capture_output=False, timeout=300)
             结果[平台] = 执行.returncode == 0
-            日志.info(f"【{平台}】{'OK' if 结果[平台] else 'FAIL'}: {执行.stdout[:200]}")
+            日志.info(f"【{平台}】{'OK' if 结果[平台] else 'FAIL (code %d)' % 执行.returncode}")
+        except subprocess.TimeoutExpired:
+            结果[平台] = False
+            日志.error(f"【{平台}】超时")
         except Exception as e:
             结果[平台] = False
             日志.error(f"【{平台}】异常: {e}")
