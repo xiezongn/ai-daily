@@ -9,7 +9,6 @@ import time
 import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
-from xml.etree import ElementTree
 from PIL import Image, ImageDraw, ImageFont
 
 # ── 配置 ──
@@ -30,37 +29,40 @@ logging.basicConfig(level=logging.INFO,
 
 
 # ============================================================
-# RSS 采集
+# Firecrawl 搜索 + 爬取
 # ============================================================
-RSS源 = [
-    ("36氪", "https://36kr.com/feed"),
-    ("机器之心", "https://www.jiqizhixin.com/rss"),
+FIRECRAWL_KEY = "fc-da7871fc9d8f45aaafe06f75014f0603"
+FIRE_SEARCH = "https://api.firecrawl.dev/v1/search"
+FIRE_SCRAPE = "https://api.firecrawl.dev/v1/scrape"
+
+搜索词 = [
+    ("36氪", "site:36kr.com AI 人工智能 最新"),
+    ("知乎", "site:zhihu.com AI 人工智能 新闻"),
+    ("虎嗅", "site:huxiu.com AI 人工智能"),
 ]
 
 def 采集() -> list:
-    """从 RSS 抓取昨日新闻，返回 [{标题, 链接, 来源, 内容}]"""
+    """用 Firecrawl 搜 AI 热点，返回 [{标题, 链接, 来源}]"""
     全部 = []
-    for 名称, 地址 in RSS源:
+    for 名称, 关键词 in 搜索词:
         try:
-            响应 = urllib.request.urlopen(地址, timeout=15)
-            # ponytail: 简单 RSS 解析，不兼容所有格式，能用就行
-            根 = ElementTree.fromstring(响应.read())
-            for 条目 in 根.iter():
-                if 条目.tag.endswith("}entry") or 条目.tag == "entry":
-                    标题 = (条目.find("./title") or 条目.find("./{http://www.w3.org/2005/Atom}title"))
-                    链接 = (条目.find("./link") or 条目.find("./{http://www.w3.org/2005/Atom}link"))
-                    摘要 = (条目.find("./summary") or 条目.find("./{http://www.w3.org/2005/Atom}summary"))
-                    if 标题 is not None and 标题.text:
-                        全部.append({
-                            "标题": 标题.text.strip(),
-                            "链接": 链接.attrib.get("href", "") if 链接 is not None else "",
-                            "来源": 名称,
-                            "内容": (摘要.text or "")[:200] if 摘要 is not None else ""
-                        })
-            日志.info(f"【{名称}】采集到 {len(全部)} 条")
+            请求体 = json.dumps({"query": 关键词, "limit": 5}).encode()
+            请求 = urllib.request.Request(FIRE_SEARCH, data=请求体,
+                headers={"Authorization": f"Bearer {FIRECRAWL_KEY}", "Content-Type": "application/json"})
+            响应 = json.loads(urllib.request.urlopen(请求, timeout=15).read())
+            for 条目 in 响应.get("data", []):
+                标题 = 条目.get("title", "").strip()
+                if 标题:
+                    全部.append({"标题": 标题, "链接": 条目.get("url", ""), "来源": 名称})
+            日志.info(f"【{名称}】搜到 {len(响应.get('data',[]))} 条")
         except Exception as e:
-            日志.warning(f"【{名称}】采集失败: {e}")
-    return 全部
+            日志.warning(f"【{名称}】搜索失败: {e}")
+    # 简单去重
+    去重, 见过 = [], set()
+    for n in 全部:
+        if n["标题"] not in 见过:
+            见过.add(n["标题"]); 去重.append(n)
+    return 去重
 
 
 # ============================================================
