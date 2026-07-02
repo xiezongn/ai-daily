@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 import urllib.request
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
@@ -42,7 +42,7 @@ FIRE_SCRAPE = "https://api.firecrawl.dev/v1/scrape"
 ]
 
 def 采集() -> list:
-    """用 Firecrawl 搜 AI 热点，返回 [{标题, 链接, 来源}]"""
+    """用 Firecrawl 搜 AI 热点，返回 [{标题, 链接, 来源, 描述}]"""
     全部 = []
     for 名称, 关键词 in 搜索词:
         try:
@@ -53,7 +53,8 @@ def 采集() -> list:
             for 条目 in 响应.get("data", []):
                 标题 = 条目.get("title", "").strip()
                 if 标题:
-                    全部.append({"标题": 标题, "链接": 条目.get("url", ""), "来源": 名称})
+                    全部.append({"标题": 标题, "链接": 条目.get("url", ""),
+                                 "来源": 名称, "描述": 条目.get("description", "")[:300]})
             日志.info(f"【{名称}】搜到 {len(响应.get('data',[]))} 条")
         except Exception as e:
             日志.warning(f"【{名称}】搜索失败: {e}")
@@ -88,7 +89,7 @@ def 精选(原始数据: list) -> list:
         "```\n\n新闻：\n"
     )
     for i, n in enumerate(原始数据[:25]):
-        提示 += f"{i+1}. {n['标题'][:100]}\n"
+        提示 += f"{i+1}. {n['标题'][:100]}\n   简介: {n.get('描述', '')[:200]}\n"
 
     with sync_playwright() as p:
         浏览器 = p.chromium.connect_over_cdp(CDP地址)
@@ -201,45 +202,35 @@ def 渲染轮播图(精选结果: list) -> tuple:
 # 发布
 # ============================================================
 def 发布(图片列表: list, 文案: str) -> dict:
-    """调用 sau CLI 发布到各平台，返回 {平台: 成功/失败}"""
-    结果 = {}
-    for 平台 in 平台列表:
-        try:
-            # ponytail: 直接调 CLI，不 capture_output（sau 输出有 emoji，GBK 解码会炸）
-            命令 = ["sau", 平台, "upload-note",
-                    "--account", 账号,
-                    "--title", "AI 日报",
-                    "--note", 文案]
-            for 图 in 图片列表:
-                命令 += ["--images", 图]
-            执行 = subprocess.run(命令, capture_output=False, timeout=300)
-            结果[平台] = 执行.returncode == 0
-            日志.info(f"【{平台}】{'OK' if 结果[平台] else 'FAIL (code %d)' % 执行.returncode}")
-        except subprocess.TimeoutExpired:
-            结果[平台] = False
-            日志.error(f"【{平台}】超时")
-        except Exception as e:
-            结果[平台] = False
-            日志.error(f"【{平台}】异常: {e}")
-    return 结果
+    """并行发到各平台，互不阻塞，超时120s"""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
-def 测试发布():
-    """用测试图验证各平台发布"""
-    import subprocess
-    for 平台 in 平台列表:
-        print(f"\n=== 测试 {平台} ===")
+    def _发一个(平台: str) -> tuple:
         命令 = ["sau", 平台, "upload-note",
                 "--account", 账号,
-                "--title", "AI日报测试",
-                "--note", "这是一条测试，稍后删除",
-                "--images", "output/test.png",
-                "--headless"]
-        r = subprocess.run(命令, capture_output=True, text=True, timeout=180)
-        print(f"返回码: {r.returncode}")
-        print(f"输出: {r.stdout[:300]}")
-        if r.stderr:
-            print(f"错误: {r.stderr[:300]}")
+                "--title", "AI 日报",
+                "--note", 文案]
+        for 图 in 图片列表:
+            命令 += ["--images", 图]
+        try:
+            执行 = subprocess.run(命令, capture_output=False, timeout=120)
+            ok = 执行.returncode == 0
+            日志.info(f"【{平台}】{'OK' if ok else 'FAIL'}")
+            return 平台, ok
+        except subprocess.TimeoutExpired:
+            日志.error(f"【{平台}】超时")
+            return 平台, False
+        except Exception as e:
+            日志.error(f"【{平台}】异常: {e}")
+            return 平台, False
 
+    with ThreadPoolExecutor(max_workers=3) as 池:
+        任务 = {池.submit(_发一个, p): p for p in 平台列表}
+        结果 = {}
+        for 完成 in as_completed(任务):
+            p, ok = 完成.result()
+            结果[p] = ok
+        return 结果
 
 # ============================================================
 # 主入口
