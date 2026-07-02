@@ -206,16 +206,36 @@ def 发布(图片列表: list, 文案: str) -> dict:
     for 平台 in 平台列表:
         try:
             # ponytail: 直接调 CLI，不封装 API
-            命令 = ["sau", 平台, "upload-note", "--account", 账号, "--text", 文案]
+            命令 = ["sau", 平台, "upload-note",
+                    "--account", 账号,
+                    "--title", "AI 日报",
+                    "--note", 文案]
             for 图 in 图片列表:
                 命令 += ["--images", 图]
-            执行 = subprocess.run(命令, capture_output=True, text=True, timeout=120)
+            执行 = subprocess.run(命令, capture_output=True, text=True, timeout=180)
             结果[平台] = 执行.returncode == 0
-            日志.info(f"【{平台}】{'✅ 成功' if 结果[平台] else '❌ 失败'}: {执行.stdout[:100]}")
+            日志.info(f"【{平台}】{'OK' if 结果[平台] else 'FAIL'}: {执行.stdout[:200]}")
         except Exception as e:
             结果[平台] = False
             日志.error(f"【{平台}】异常: {e}")
     return 结果
+
+def 测试发布():
+    """用测试图验证各平台发布"""
+    import subprocess
+    for 平台 in 平台列表:
+        print(f"\n=== 测试 {平台} ===")
+        命令 = ["sau", 平台, "upload-note",
+                "--account", 账号,
+                "--title", "AI日报测试",
+                "--note", "这是一条测试，稍后删除",
+                "--images", "output/test.png",
+                "--headless"]
+        r = subprocess.run(命令, capture_output=True, text=True, timeout=180)
+        print(f"返回码: {r.returncode}")
+        print(f"输出: {r.stdout[:300]}")
+        if r.stderr:
+            print(f"错误: {r.stderr[:300]}")
 
 
 # ============================================================
