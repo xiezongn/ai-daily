@@ -1,12 +1,14 @@
 """AI 日报 — 每日自动产出并分发"""
 import json
 import logging
+import os
 import random
 import re
 import subprocess
 import sys
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
@@ -22,18 +24,40 @@ DEEPSEEK端口 = 9226
 常规字体 = "C:/Windows/Fonts/msyh.ttc"
 图片宽 = 1080
 图片高 = 1920
+FIRECRAWL_KEY = os.getenv("FIRECRAWL_KEY", "fc-da7871fc9d8f45aaafe06f75014f0603")
 
 logging.basicConfig(level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s")
 日志 = logging.getLogger(__name__)
 
+# 预建固定尺寸的蒙层和卡片（省得每次重新建）
+_蒙层厚 = Image.new("RGBA", (图片宽, 图片高), (0, 0, 0, 180))
+_蒙层薄 = Image.new("RGBA", (图片宽, 图片高), (0, 0, 0, 120))
+_卡片 = Image.new("RGBA", (920, 280), (255, 255, 255, 40))
+
+# 背景图缓存（glob 一次后面复用）
+_BG缓存 = None
+def _取背景图():
+    global _BG缓存
+    if _BG缓存 is None:
+        _BG缓存 = list(BG目录.glob("*.jpg")) + list(BG目录.glob("*.png")) + list(BG目录.glob("*.jpeg"))
+    return _BG缓存 or None
+
+def _加载底图(alpha: int) -> Image.Image:
+    """加载背景图 + 半透明蒙层"""
+    背景列表 = _取背景图()
+    if 背景列表:
+        底图 = Image.open(random.choice(背景列表)).resize((图片宽, 图片高)).convert("RGBA")
+    else:
+        底图 = Image.new("RGBA", (图片宽, 图片高), (10, 15, 40))
+    蒙层 = _蒙层厚 if alpha >= 150 else _蒙层薄
+    return Image.alpha_composite(底图, 蒙层)
+
 
 # ============================================================
-# Firecrawl 搜索 + 爬取
+# Firecrawl 搜索
 # ============================================================
-FIRECRAWL_KEY = "fc-da7871fc9d8f45aaafe06f75014f0603"
 FIRE_SEARCH = "https://api.firecrawl.dev/v1/search"
-FIRE_SCRAPE = "https://api.firecrawl.dev/v1/scrape"
 
 搜索词 = [
     ("36氪", "site:36kr.com AI 人工智能 最新"),
@@ -41,24 +65,31 @@ FIRE_SCRAPE = "https://api.firecrawl.dev/v1/scrape"
     ("虎嗅", "site:huxiu.com AI 人工智能"),
 ]
 
+def _搜单源(名称: str, 关键词: str) -> list:
+    """搜一个源，返回 [{标题, 链接, 来源, 描述}]"""
+    结果 = []
+    try:
+        请求体 = json.dumps({"query": 关键词, "limit": 5}).encode()
+        请求 = urllib.request.Request(FIRE_SEARCH, data=请求体,
+            headers={"Authorization": f"Bearer {FIRECRAWL_KEY}", "Content-Type": "application/json"})
+        with urllib.request.urlopen(请求, timeout=15) as 响应:
+            数据 = json.loads(响应.read())
+        for 条目 in 数据.get("data", []):
+            标题 = 条目.get("title", "").strip()
+            if 标题:
+                结果.append({"标题": 标题, "链接": 条目.get("url", ""),
+                            "来源": 名称, "描述": 条目.get("description", "")[:300]})
+        日志.info(f"【{名称}】搜到 {len(数据.get('data',[]))} 条")
+    except Exception as e:
+        日志.warning(f"【{名称}】搜索失败: {e}")
+    return 结果
+
 def 采集() -> list:
-    """用 Firecrawl 搜 AI 热点，返回 [{标题, 链接, 来源, 描述}]"""
-    全部 = []
-    for 名称, 关键词 in 搜索词:
-        try:
-            请求体 = json.dumps({"query": 关键词, "limit": 5}).encode()
-            请求 = urllib.request.Request(FIRE_SEARCH, data=请求体,
-                headers={"Authorization": f"Bearer {FIRECRAWL_KEY}", "Content-Type": "application/json"})
-            响应 = json.loads(urllib.request.urlopen(请求, timeout=15).read())
-            for 条目 in 响应.get("data", []):
-                标题 = 条目.get("title", "").strip()
-                if 标题:
-                    全部.append({"标题": 标题, "链接": 条目.get("url", ""),
-                                 "来源": 名称, "描述": 条目.get("description", "")[:300]})
-            日志.info(f"【{名称}】搜到 {len(响应.get('data',[]))} 条")
-        except Exception as e:
-            日志.warning(f"【{名称}】搜索失败: {e}")
-    # 简单去重
+    """并行搜 AI 热点，去重后返回"""
+    with ThreadPoolExecutor(max_workers=3) as 池:
+        全部 = []
+        for 一批 in 池.map(lambda s: _搜单源(*s), 搜索词):
+            全部.extend(一批)
     去重, 见过 = [], set()
     for n in 全部:
         if n["标题"] not in 见过:
@@ -131,46 +162,24 @@ def 居中写文字(绘图, 文字, 字体, 颜色, y坐标):
 
 def 生成封面(日期: str, 条数: int, 输出路径: Path) -> str:
     """生成封面图"""
-    背景图列表 = list(BG目录.glob("*"))
-    if 背景图列表:
-        底图 = Image.open(random.choice(背景图列表)).resize((图片宽, 图片高)).convert("RGBA")
-    else:
-        底图 = Image.new("RGBA", (图片宽, 图片高), (10, 15, 40))
-    # 半透明黑色蒙层
-    蒙层 = Image.new("RGBA", 底图.size, (0, 0, 0, 180))
-    底图 = Image.alpha_composite(底图, 蒙层)
+    底图 = _加载底图(180)
     绘图 = ImageDraw.Draw(底图)
-
-    大字体 = ImageFont.truetype(粗体字, 96)
-    中字体 = ImageFont.truetype(粗体字, 36)
-    居中写文字(绘图, "AI 日报", 大字体, "white", 820)
-    居中写文字(绘图, 日期, 中字体, "white", 960)
-    居中写文字(绘图, f"今日 {条数} 条热点", 中字体, "white", 1020)
-
+    ImageFont.truetype(粗体字, 96)
+    居中写文字(绘图, "AI 日报", ImageFont.truetype(粗体字, 96), "white", 820)
+    居中写文字(绘图, 日期, ImageFont.truetype(粗体字, 36), "white", 960)
+    居中写文字(绘图, f"今日 {条数} 条热点", ImageFont.truetype(粗体字, 36), "white", 1020)
     文件路径 = str(输出路径 / "封面.png")
     底图.save(文件路径)
     return 文件路径
 
 def 生成内容页(标题: str, 页码: int, 总页: int, 输出路径: Path) -> str:
     """生成单条新闻内容页"""
-    背景图列表 = list(BG目录.glob("*"))
-    if 背景图列表:
-        底图 = Image.open(random.choice(背景图列表)).resize((图片宽, 图片高)).convert("RGBA")
-    else:
-        底图 = Image.new("RGBA", (图片宽, 图片高), (10, 15, 40))
-    蒙层 = Image.new("RGBA", 底图.size, (0, 0, 0, 120))
-    底图 = Image.alpha_composite(底图, 蒙层)
-
-    # 文字卡片（毛玻璃效果用半透明白色矩形模拟）
-    卡片 = Image.new("RGBA", (920, 280), (255, 255, 255, 40))
-    底图.paste(卡片, (80, 820), 卡片)
+    底图 = _加载底图(120)
+    底图.paste(_卡片, (80, 820), _卡片)
     绘图 = ImageDraw.Draw(底图)
-
-    标题字体 = ImageFont.truetype(粗体字, 52)
-    小字体 = ImageFont.truetype(常规字体, 28)
-    居中写文字(绘图, 标题, 标题字体, "white", 960)
-    绘图.text((920, 1720), f"{页码}/{总页}", fill=(255, 255, 255, 120), font=小字体, anchor="ra")
-
+    居中写文字(绘图, 标题, ImageFont.truetype(粗体字, 52), "white", 960)
+    绘图.text((920, 1720), f"{页码}/{总页}", fill=(255, 255, 255, 120),
+              font=ImageFont.truetype(常规字体, 28), anchor="ra")
     文件路径 = str(输出路径 / f"第{页码}页.png")
     底图.save(文件路径)
     return 文件路径
@@ -203,8 +212,6 @@ def 渲染轮播图(精选结果: list) -> tuple:
 # ============================================================
 def 发布(图片列表: list, 文案: str) -> dict:
     """并行发到各平台，互不阻塞，超时120s"""
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
     def _发一个(平台: str) -> tuple:
         命令 = ["sau", 平台, "upload-note",
                 "--account", 账号,
@@ -275,12 +282,9 @@ def main():
     日志.info(f"完成: {成功数}/{len(发布结果)} 平台发布成功")
 
     # 5. 归档
-    # ponytail: git 存档一步，不写归档模块
-    subprocess.run(["git", "add", "-A"], cwd=Path(__file__).parent)
-    subprocess.run(
-        ["git", "commit", "-m", f"日常: AI日报 {datetime.now().strftime('%Y-%m-%d')}"],
-        cwd=Path(__file__).parent,
-    )
+    # ponytail: git 存档一步
+    subprocess.run(["git", "commit", "-a", "-m", f"日常: AI日报 {datetime.now().strftime('%Y-%m-%d')}"],
+                   cwd=Path(__file__).parent)
 
     return 成功数 > 0
 
