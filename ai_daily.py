@@ -203,13 +203,18 @@ def 生成封面(日期: str, 最热标题: str, 输出路径: Path) -> str:
         标题尺寸 -= 20
     居中写文字(绘图, 最热标题, 标题字体, (255, 255, 255), 550)
 
-    # 英文花体（三行，居中，55px）
+    # 英文花体（两行，居中，太长则缩小）
+    英文行 = ["A transformation beyond all measure", "is upon us"]
     英文尺寸 = 55
-    英文行 = ["A transformation", "beyond all measure", "is upon us"]
+    最长行 = max(英文行, key=lambda s: 绘图.textbbox((0, 0), s, font=ImageFont.truetype("fonts/EnglandHandDB.ttf", 55))[2])
+    for 尝试 in range(3):
+        bbox = 绘图.textbbox((0, 0), 最长行, font=ImageFont.truetype("fonts/EnglandHandDB.ttf", 英文尺寸))
+        if bbox[2] - bbox[0] <= 1000:
+            break
+        英文尺寸 -= 5
     y = 870
     for 行 in 英文行:
-        英文字体 = ImageFont.truetype("fonts/EnglandHandDB.ttf", 英文尺寸)
-        居中写文字(绘图, 行, 英文字体, (255, 255, 255), y)
+        居中写文字(绘图, 行, ImageFont.truetype("fonts/EnglandHandDB.ttf", 英文尺寸), (255, 255, 255), y)
         y += 75
 
     # 日期（右下角）
