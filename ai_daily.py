@@ -193,15 +193,29 @@ def 生成封面(日期: str, 最热标题: str, 输出路径: Path) -> str:
     底图 = Image.new("RGBA", (图片宽, 图片高), (2, 2, 5))
     绘图 = ImageDraw.Draw(底图)
 
-    # 中文标题（占画面1/3，自适应缩小到900px内）
-    标题尺寸 = 180
-    for 尝试 in range(12):
-        标题字体 = ImageFont.truetype("fonts/三极行楷简体-粗.ttf", 标题尺寸)
-        bbox = 绘图.textbbox((0, 0), 最热标题, font=标题字体)
+    # 中文标题（拆两行，每行都用大字）
+    长 = len(最热标题)
+    if 长 <= 4:
+        标题行 = [最热标题]
+    else:
+        中 = 长 // 2
+        标题行 = [最热标题[:中], 最热标题[中:]]
+
+    # 每行自适应到 880px 内
+    一行尺寸 = 180
+    for 尝试 in range(10):
+        最长 = max(标题行, key=lambda s: 绘图.textbbox((0, 0), s,
+            font=ImageFont.truetype("fonts/三极行楷简体-粗.ttf", 一行尺寸))[2])
+        bbox = 绘图.textbbox((0, 0), 最长,
+            font=ImageFont.truetype("fonts/三极行楷简体-粗.ttf", 一行尺寸))
         if bbox[2] - bbox[0] <= 880:
             break
-        标题尺寸 -= 12
-    居中写文字(绘图, 最热标题, 标题字体, (255, 255, 255), 550)
+        一行尺寸 -= 14
+    y = 500
+    for 行 in 标题行:
+        居中写文字(绘图, 行, ImageFont.truetype("fonts/三极行楷简体-粗.ttf", 一行尺寸),
+                   (255, 255, 255), y)
+        y += 一行尺寸 + 30
 
     # 英文花体（两行，居中，太长则缩小）
     英文行 = ["A transformation beyond all measure", "is upon us"]
