@@ -84,8 +84,24 @@ def _搜单源(名称: str, 关键词: str) -> list:
         日志.warning(f"【{名称}】搜索失败: {e}")
     return 结果
 
+
+FIRE_SCRAPE = "https://api.firecrawl.dev/v1/scrape"
+
+def _爬全文(url: str) -> str | None:
+    """抓取文章全文前 500 字"""
+    try:
+        请求体 = json.dumps({"url": url, "formats": ["markdown"]}).encode()
+        请求 = urllib.request.Request(FIRE_SCRAPE, data=请求体,
+            headers={"Authorization": f"Bearer {FIRECRAWL_KEY}", "Content-Type": "application/json"})
+        with urllib.request.urlopen(请求, timeout=15) as 响应:
+            数据 = json.loads(响应.read())
+        markdown = 数据.get("data", {}).get("markdown", "")[:500]
+        return markdown.strip() or None
+    except Exception:
+        return None
+
+
 def 采集() -> list:
-    """并行搜 AI 热点，去重后返回"""
     with ThreadPoolExecutor(max_workers=3) as 池:
         全部 = []
         for 一批 in 池.map(lambda s: _搜单源(*s), 搜索词):
@@ -94,6 +110,16 @@ def 采集() -> list:
     for n in 全部:
         if n["标题"] not in 见过:
             见过.add(n["标题"]); 去重.append(n)
+
+    # 并行爬全文
+    def _补全文(条目):
+        if 全文 := _爬全文(条目["链接"]):
+            条目["描述"] = 全文
+        return 条目
+
+    with ThreadPoolExecutor(max_workers=5) as 池:
+        去重 = list(池.map(_补全文, 去重))
+
     return 去重
 
 
