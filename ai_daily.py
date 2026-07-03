@@ -240,35 +240,44 @@ def 生成封面(日期: str, 最热标题: str, 输出路径: Path) -> str:
     return 文件路径
 
 def 生成内容页(标题: str, 摘要: str, 页码: int, 总页: int, 输出路径: Path) -> str:
-    """科技背景 + 卡片 + 标题 + 摘要"""
+    """科技背景 + 卡片 + 标题 + 多行正文"""
     底图 = _加载底图(120)
     绘图 = ImageDraw.Draw(底图)
 
-    # 卡片（水平居中，顶部留 192px）
-    卡片 = Image.new("RGBA", (920, 400), (255, 255, 255, 40))
-    底图.paste(卡片, (80, 192), 卡片)
+    # 卡片（居中，足够高展示内容）
+    卡片 = Image.new("RGBA", (920, 700), (255, 255, 255, 40))
+    底图.paste(卡片, (80, 160), 卡片)
 
-    # 标题（行楷，自适应大小确保不超卡片）
-    标题尺寸 = 52
-    for 尝试 in range(3):
-        标题字体 = ImageFont.truetype(str(Path("fonts") / "三极行楷简体-粗.ttf"), 标题尺寸)
-        bbox = 绘图.textbbox((0, 0), 标题, font=标题字体)
-        if bbox[2] - bbox[0] <= 840:
-            break
-        标题尺寸 -= 8
+    # 标题（行楷 40px，顶部）
+    标题字体 = ImageFont.truetype(str(Path("fonts") / "三极行楷简体-粗.ttf"), 40)
     bbox = 绘图.textbbox((0, 0), 标题, font=标题字体)
     x = (图片宽 - (bbox[2] - bbox[0])) // 2
-    绘图.text((x, 230), 标题, fill="white", font=标题字体)
+    绘图.text((x, 190), 标题, fill="white", font=标题字体)
 
-    # 摘要（32px 常规，动态截断到840px内）
-    摘要字体 = ImageFont.truetype(常规字体, 32)
-    摘要短 = 摘要
-    while True:
-        bbox2 = 绘图.textbbox((0, 0), 摘要短, font=摘要字体)
-        if bbox2[2] - bbox2[0] <= 840:
-            break
-        摘要短 = 摘要短[:max(len(摘要短) - 5, 0)]
-    居中写文字(绘图, 摘要短, 摘要字体, "white", 340)
+    # 正文（28px，自动换行）
+    正文字体 = ImageFont.truetype(常规字体, 28)
+    正文 = 摘要 or ""
+    行高 = 40
+    y = 270
+    pos = 0
+    while pos < len(正文) and y + 行高 < 830:
+        # 从pos开始，找能放满一行的最大长度
+        剩余 = 正文[pos:]
+        for n in range(len(剩余), 0, -1):
+            if 绘图.textbbox((0, 0), 剩余[:n], font=正文字体)[2] <= 840:
+                break
+        一行 = 剩余[:n]
+        pos += n
+        # 如果还有内容但下一行放不下了，截短加省略号
+        if pos < len(正文) and y + 行高 * 2 >= 830:
+            一行 = 一行[:max(n - 3, 1)] + "..."
+        x2 = (图片宽 - (绘图.textbbox((0, 0), 一行, font=正文字体)[2])) // 2
+        绘图.text((x2, y), 一行, fill="white", font=正文字体)
+        y += 行高
+
+    # 页码
+    绘图.text((920, 1720), f"{页码}/{总页}", fill=(255, 255, 255, 120),
+              font=ImageFont.truetype(常规字体, 28), anchor="ra")
 
     # 页码
     绘图.text((920, 1720), f"{页码}/{总页}", fill=(255, 255, 255, 120),
@@ -289,8 +298,7 @@ def 渲染轮播图(精选结果: list) -> tuple:
     图片列表.append(生成封面(今日, 精选结果[0]["标题"], 本次输出))
     # 内容页
     for i, 条目 in enumerate(精选结果):
-        # 图片列表.append(生成内容页(条目["标题"], 条目["摘要"], i + 1, len(精选结果), 本次输出))
-        pass
+        图片列表.append(生成内容页(条目["标题"], 条目["摘要"], i + 1, len(精选结果), 本次输出))
 
     # 文案
     文案 = f"🤖 AI 日报 | {今日}\n\n今日 {len(精选结果)} 条 AI 热点速览：\n\n"
