@@ -211,14 +211,40 @@ def 生成封面(日期: str, 最热标题: str, 输出路径: Path) -> str:
     底图.save(文件路径)
     return 文件路径
 
-def 生成内容页(标题: str, 页码: int, 总页: int, 输出路径: Path) -> str:
-    """生成单条新闻内容页"""
+def 生成内容页(标题: str, 摘要: str, 页码: int, 总页: int, 输出路径: Path) -> str:
+    """科技背景 + 卡片 + 标题 + 摘要"""
     底图 = _加载底图(120)
-    底图.paste(_卡片, (80, 820), _卡片)
     绘图 = ImageDraw.Draw(底图)
-    居中写文字(绘图, 标题, ImageFont.truetype(粗体字, 52), "white", 960)
+
+    # 卡片（水平居中，顶部留 192px）
+    卡片 = Image.new("RGBA", (920, 380), (255, 255, 255, 40))
+    底图.paste(卡片, (80, 192), 卡片)
+
+    # 标题（52px 行楷）
+    标题字体 = ImageFont.truetype(str(Path("fonts") / "三极行楷简体-粗.ttf"), 52)
+    bbox = 绘图.textbbox((0, 0), 标题, font=标题字体)
+    标题宽 = bbox[2] - bbox[0]
+    x = (图片宽 - 标题宽) // 2
+    绘图.text((x, 230), 标题, fill="white", font=标题字体)
+
+    # 摘要（32px 常规）
+    摘要字体 = ImageFont.truetype(常规字体, 32)
+    bbox2 = 绘图.textbbox((0, 0), 摘要, font=摘要字体)
+    摘要宽 = bbox2[2] - bbox2[0]
+    # 若摘要太长就截短
+    if 摘要宽 > 840:
+        摘要短 = 摘要[:50] + "..."
+    else:
+        摘要短 = 摘要
+    bbox2 = 绘图.textbbox((0, 0), 摘要短, font=摘要字体)
+    摘要宽 = bbox2[2] - bbox2[0]
+    x2 = (图片宽 - 摘要宽) // 2
+    绘图.text((x2, 320), 摘要短, fill="white", font=摘要字体)
+
+    # 页码
     绘图.text((920, 1720), f"{页码}/{总页}", fill=(255, 255, 255, 120),
               font=ImageFont.truetype(常规字体, 28), anchor="ra")
+
     文件路径 = str(输出路径 / f"第{页码}页.png")
     底图.save(文件路径)
     return 文件路径
@@ -234,7 +260,7 @@ def 渲染轮播图(精选结果: list) -> tuple:
     图片列表.append(生成封面(今日, 精选结果[0]["标题"], 本次输出))
     # 内容页
     for i, 条目 in enumerate(精选结果):
-        图片列表.append(生成内容页(条目["标题"], i + 1, len(精选结果), 本次输出))
+        图片列表.append(生成内容页(条目["标题"], 条目["摘要"], i + 1, len(精选结果), 本次输出))
 
     # 文案
     文案行 = ["🤖 AI 日报\n"]
