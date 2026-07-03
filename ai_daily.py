@@ -25,6 +25,8 @@ DEEPSEEK端口 = 9226
 图片宽 = 1080
 图片高 = 1920
 FIRECRAWL_KEY = os.getenv("FIRECRAWL_KEY", "fc-da7871fc9d8f45aaafe06f75014f0603")
+字体_行楷 = ImageFont.truetype("fonts/三极行楷简体-粗.ttf", 80)
+字体_花体 = ImageFont.truetype("fonts/EnglandHandDB.ttf", 36)
 
 logging.basicConfig(level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s")
@@ -186,14 +188,25 @@ def 居中写文字(绘图, 文字, 字体, 颜色, y坐标):
     x = (图片宽 - (边框[2] - 边框[0])) // 2
     绘图.text((x, y坐标), 文字, fill=颜色, font=字体)
 
-def 生成封面(日期: str, 条数: int, 输出路径: Path) -> str:
-    """生成封面图"""
-    底图 = _加载底图(180)
+def 生成封面(日期: str, 最热标题: str, 输出路径: Path) -> str:
+    """纯黑底 + 最热标题 + 英文花体 + 日期"""
+    底图 = Image.new("RGBA", (图片宽, 图片高), (0, 0, 0))
     绘图 = ImageDraw.Draw(底图)
-    ImageFont.truetype(粗体字, 96)
-    居中写文字(绘图, "AI 日报", ImageFont.truetype(粗体字, 96), "white", 820)
-    居中写文字(绘图, 日期, ImageFont.truetype(粗体字, 36), "white", 960)
-    居中写文字(绘图, f"今日 {条数} 条热点", ImageFont.truetype(粗体字, 36), "white", 1020)
+
+    # 中文标题（居中偏上）
+    居中写文字(绘图, 最热标题, 字体_行楷, "white", 700)
+
+    # 英文花体（三行，居中）
+    英文行 = ["A transformation", "beyond all measure", "is upon us"]
+    y = 900
+    for 行 in 英文行:
+        居中写文字(绘图, 行, 字体_花体, "white", y)
+        y += 50
+
+    # 日期（右下角）
+    绘图.text((1020, 1840), 日期, fill="white",
+              font=ImageFont.truetype(常规字体, 28), anchor="ra")
+
     文件路径 = str(输出路径 / "封面.png")
     底图.save(文件路径)
     return 文件路径
@@ -218,7 +231,7 @@ def 渲染轮播图(精选结果: list) -> tuple:
 
     图片列表 = []
     # 封面
-    图片列表.append(生成封面(今日, len(精选结果), 本次输出))
+    图片列表.append(生成封面(今日, 精选结果[0]["标题"], 本次输出))
     # 内容页
     for i, 条目 in enumerate(精选结果):
         图片列表.append(生成内容页(条目["标题"], i + 1, len(精选结果), 本次输出))
