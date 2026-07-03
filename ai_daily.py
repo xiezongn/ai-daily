@@ -193,25 +193,25 @@ def 生成封面(日期: str, 最热标题: str, 输出路径: Path) -> str:
     底图 = Image.new("RGBA", (图片宽, 图片高), (2, 2, 5))
     绘图 = ImageDraw.Draw(底图)
 
-    # 中文标题（占画面1/3，自适应缩小）
-    标题尺寸 = 200
-    for 尝试 in range(5):
+    # 中文标题（占画面1/3，自适应缩小到900px内）
+    标题尺寸 = 180
+    for 尝试 in range(12):
         标题字体 = ImageFont.truetype("fonts/三极行楷简体-粗.ttf", 标题尺寸)
         bbox = 绘图.textbbox((0, 0), 最热标题, font=标题字体)
-        if bbox[2] - bbox[0] <= 1000:
+        if bbox[2] - bbox[0] <= 880:
             break
-        标题尺寸 -= 20
+        标题尺寸 -= 12
     居中写文字(绘图, 最热标题, 标题字体, (255, 255, 255), 550)
 
     # 英文花体（两行，居中，太长则缩小）
     英文行 = ["A transformation beyond all measure", "is upon us"]
     英文尺寸 = 55
     最长行 = max(英文行, key=lambda s: 绘图.textbbox((0, 0), s, font=ImageFont.truetype("fonts/EnglandHandDB.ttf", 55))[2])
-    for 尝试 in range(3):
+    for 尝试 in range(4):
         bbox = 绘图.textbbox((0, 0), 最长行, font=ImageFont.truetype("fonts/EnglandHandDB.ttf", 英文尺寸))
-        if bbox[2] - bbox[0] <= 1000:
+        if bbox[2] - bbox[0] <= 860:
             break
-        英文尺寸 -= 5
+        英文尺寸 -= 8
     y = 870
     for 行 in 英文行:
         居中写文字(绘图, 行, ImageFont.truetype("fonts/EnglandHandDB.ttf", 英文尺寸), (255, 255, 255), y)
